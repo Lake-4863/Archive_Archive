@@ -1,0 +1,32 @@
+[project]
+name = "discord-web-briefing"
+version = "0.1.0"
+description = "Daily web briefing and Q&A Discord bots"
+requires-python = ">=3.10"
+dependencies = [
+    "aiosqlite>=0.20.0",
+    "apscheduler>=3.10.4",
+    "beautifulsoup4>=4.12.3",
+    "discord.py>=2.4.0",
+    "feedparser>=6.0.11",
+    "httpx>=0.27.2",
+    "openai>=1.52.0",
+    "python-dotenv>=1.0.1",
+    "pyyaml>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.7.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/briefing_bots/__init__.py
+src/briefing_bots/collector.py
+src/briefing_bots/digest.py
+src/briefing_bots/digest_bot.py
+src/briefing_bots/qa.py
+src/briefing_bots/qa_bot.py
+src/briefing_bots/run_digest_once.py
+src/briefing_bots/settings.py
+src/briefing_bots/storage.py
+src/discord_web_briefing.egg-info/PKG-INFO
+src/discord_web_briefing.egg-info/SOURCES.txt
+src/discord_web_briefing.egg-info/dependency_links.txt
+src/discord_web_briefing.egg-info/requires.txt
+src/discord_web_briefing.egg-info/top_level.txt

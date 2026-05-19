@@ -1,0 +1,32 @@
+schedule:
+  hour: 20
+  minute: 30
+
+digest:
+  max_items: 12
+  max_message_chars: 1800
+
+channels:
+  - channel_id: 1504880650241577012
+    name: "ブルーアーカイブ"
+    keywords:
+      - "ブルーアーカイブ"
+      - "Blue Archive"
+    sources:
+      - name: "@Blue_ArchiveJP"
+        url: "https://rss.app/feeds/lGjrSzHrns6LAfax.xml"
+        kind: "rss"
+
+  - channel_id: 1504940548551868576
+    name: "AI情報"
+    keywords:
+      - "Claude"
+      - "Anthropic"
+      - "AI"
+    sources:
+      - name: "Reddit Claude"
+        url: "https://rss.app/feeds/IVtrdSMHT2pqf0qi.xml"
+        kind: "rss"
+      - name: "Hacker News"
+        url: "https://hnrss.org/frontpage"
+        kind: "rss"

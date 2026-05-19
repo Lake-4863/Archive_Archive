@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+import aiosqlite
+
+
+@dataclass(frozen=True)
+class Article:
+    source: str
+    title: str
+    url: str
+    published_at: str | None
+    summary: str
+    content: str
+    keywords: tuple[str, ...] = ()
+
+
+async def init_db(database_path: Path) -> None:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    async with aiosqlite.connect(database_path) as db:
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS articles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                title TEXT NOT NULL,
+                url TEXT NOT NULL UNIQUE,
+                published_at TEXT,
+                summary TEXT NOT NULL,
+                content TEXT NOT NULL,
+                fetched_at TEXT NOT NULL
+            )
+            """
+        )
+        await db.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS article_search
+            USING fts5(title, summary, content, url UNINDEXED, source UNINDEXED)
+            """
+        )
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS keywords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                value TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS article_keywords (
+                article_id INTEGER NOT NULL,
+                keyword_id INTEGER NOT NULL,
+                PRIMARY KEY (article_id, keyword_id),
+                FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE,
+                FOREIGN KEY (keyword_id) REFERENCES keywords(id) ON DELETE CASCADE
+            )
+            """
+        )
+        await db.commit()
+
+
+async def upsert_articles(database_path: Path, articles: list[Article]) -> int:
+    await init_db(database_path)
+    inserted = 0
+    async with aiosqlite.connect(database_path) as db:
+        for article in articles:
+            cursor = await db.execute(
+                """
+                INSERT OR IGNORE INTO articles
+                    (source, title, url, published_at, summary, content, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    article.source,
+                    article.title,
+                    article.url,
+                    article.published_at,
+                    article.summary,
+                    article.content,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            if cursor.rowcount:
+                inserted += 1
+                await db.execute(
+                    """
+                    INSERT INTO article_search (rowid, title, summary, content, url, source)
+                    VALUES (last_insert_rowid(), ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        article.title,
+                        article.summary,
+                        article.content,
+                        article.url,
+                        article.source,
+                    ),
+                )
+            article_id = await _article_id(db, article.url)
+            for keyword in article.keywords:
+                keyword_id = await _keyword_id(db, keyword)
+                if keyword_id is not None:
+                    await db.execute(
+                        """
+                        INSERT OR IGNORE INTO article_keywords (article_id, keyword_id)
+                        VALUES (?, ?)
+                        """,
+                        (article_id, keyword_id),
+                    )
+        await db.commit()
+    return inserted
+
+
+async def latest_articles(database_path: Path, limit: int) -> list[Article]:
+    await init_db(database_path)
+    async with aiosqlite.connect(database_path) as db:
+        rows = await db.execute_fetchall(
+            """
+            SELECT source, title, url, published_at, summary, content
+            FROM articles
+            ORDER BY COALESCE(published_at, fetched_at) DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    return [Article(*row) for row in rows]
+
+
+async def latest_articles_by_keyword(
+    database_path: Path,
+    keyword: str,
+    limit: int,
+) -> list[Article]:
+    await init_db(database_path)
+    async with aiosqlite.connect(database_path) as db:
+        rows = await db.execute_fetchall(
+            """
+            SELECT a.source, a.title, a.url, a.published_at, a.summary, a.content
+            FROM articles a
+            JOIN article_keywords ak ON ak.article_id = a.id
+            JOIN keywords k ON k.id = ak.keyword_id
+            WHERE k.value = ?
+            ORDER BY COALESCE(a.published_at, a.fetched_at) DESC
+            LIMIT ?
+            """,
+            (keyword, limit),
+        )
+    return [Article(*row, (keyword,)) for row in rows]
+
+
+def _tokenize_query(query: str) -> list[str]:
+    tokens = [t for t in query.split() if t]
+    extra = []
+    for token in tokens:
+        if re.search(r'[^\x00-\x7F]', token) and re.search(r'[A-Za-z0-9]', token):
+            extra.extend(re.findall(r'[A-Za-z0-9]+', token))
+    seen: set[str] = set()
+    result = []
+    for t in tokens + extra:
+        if t not in seen:
+            seen.add(t)
+            result.append(t)
+    return result
+
+
+async def search_articles(database_path: Path, query: str, limit: int = 8) -> list[Article]:
+    await init_db(database_path)
+    tokens = _tokenize_query(query)
+    if not tokens:
+        return []
+    fts_query = " OR ".join(f'"{token}"' for token in tokens)
+    async with aiosqlite.connect(database_path) as db:
+        try:
+            rows = await db.execute_fetchall(
+                """
+                SELECT a.source, a.title, a.url, a.published_at, a.summary, a.content
+                FROM article_search s
+                JOIN articles a ON a.id = s.rowid
+                WHERE article_search MATCH ?
+                ORDER BY bm25(article_search)
+                LIMIT ?
+                """,
+                (fts_query, limit),
+            )
+        except aiosqlite.Error:
+            rows = []
+        if rows:
+            return [Article(*row) for row in rows]
+
+        like_query = f"%{query}%"
+        rows = await db.execute_fetchall(
+            """
+            SELECT source, title, url, published_at, summary, content
+            FROM articles
+            WHERE title LIKE ? OR summary LIKE ? OR content LIKE ?
+            ORDER BY COALESCE(published_at, fetched_at) DESC
+            LIMIT ?
+            """,
+            (like_query, like_query, like_query, limit),
+        )
+    return [Article(*row) for row in rows]
+
+
+async def sync_keywords(database_path: Path, keywords: list[str]) -> None:
+    await init_db(database_path)
+    normalized = [normalize_keyword(k) for k in keywords if normalize_keyword(k)]
+    async with aiosqlite.connect(database_path) as db:
+        for kw in normalized:
+            await db.execute(
+                "INSERT OR IGNORE INTO keywords (value, created_at) VALUES (?, ?)",
+                (kw, datetime.now(timezone.utc).isoformat()),
+            )
+        await db.commit()
+
+
+async def add_keyword(database_path: Path, keyword: str) -> bool:
+    await init_db(database_path)
+    normalized = normalize_keyword(keyword)
+    if not normalized:
+        return False
+    async with aiosqlite.connect(database_path) as db:
+        cursor = await db.execute(
+            """
+            INSERT OR IGNORE INTO keywords (value, created_at)
+            VALUES (?, ?)
+            """,
+            (normalized, datetime.now(timezone.utc).isoformat()),
+        )
+        await db.commit()
+    return bool(cursor.rowcount)
+
+
+async def delete_keyword(database_path: Path, keyword: str) -> bool:
+    await init_db(database_path)
+    normalized = normalize_keyword(keyword)
+    async with aiosqlite.connect(database_path) as db:
+        rows = await db.execute_fetchall("SELECT id FROM keywords WHERE value = ?", (normalized,))
+        if not rows:
+            return False
+        keyword_id = int(rows[0][0])
+        await db.execute("DELETE FROM article_keywords WHERE keyword_id = ?", (keyword_id,))
+        cursor = await db.execute("DELETE FROM keywords WHERE value = ?", (normalized,))
+        await db.commit()
+    return bool(cursor.rowcount)
+
+
+async def list_keywords(database_path: Path) -> list[str]:
+    await init_db(database_path)
+    async with aiosqlite.connect(database_path) as db:
+        rows = await db.execute_fetchall(
+            "SELECT value FROM keywords ORDER BY value COLLATE NOCASE"
+        )
+    return [row[0] for row in rows]
+
+
+def normalize_keyword(keyword: str) -> str:
+    return " ".join(keyword.strip().split())
+
+
+async def _article_id(db: aiosqlite.Connection, url: str) -> int:
+    row = await db.execute_fetchall("SELECT id FROM articles WHERE url = ?", (url,))
+    return int(row[0][0])
+
+
+async def _keyword_id(db: aiosqlite.Connection, keyword: str) -> int | None:
+    normalized = normalize_keyword(keyword)
+    if not normalized:
+        return None
+    row = await db.execute_fetchall("SELECT id FROM keywords WHERE value = ?", (normalized,))
+    if not row:
+        return None
+    return int(row[0][0])

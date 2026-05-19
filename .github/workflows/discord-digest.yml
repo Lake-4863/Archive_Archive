@@ -1,0 +1,32 @@
+name: Discord digest
+
+on:
+  schedule:
+    - cron: "10 21 * * *"
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Post digest
+        run: python -m briefing_bots.run_notify_once
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DIGEST_DISCORD_TOKEN: ${{ secrets.DIGEST_DISCORD_TOKEN }}
+          CONFIG_PATH: config/sources.yml
+          DATABASE_PATH: data/knowledge.sqlite3
+          TIMEZONE: Asia/Tokyo
