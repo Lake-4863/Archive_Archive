@@ -50,6 +50,8 @@ async def main() -> None:
         except Exception as e:
             print(f"Sync failed: {type(e).__name__}: {e}")
 
+    await client.start(settings.qa_discord_token)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
