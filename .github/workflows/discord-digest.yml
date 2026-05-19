@@ -2,7 +2,7 @@ name: Discord digest
 
 on:
   schedule:
-    - cron: "05 21 * * *"
+    - cron: "15 12 * * *"
   workflow_dispatch:
 
 jobs:
