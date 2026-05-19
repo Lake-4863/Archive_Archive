@@ -62,6 +62,10 @@ async def init_db(database_path: Path) -> None:
             )
             """
         )
+        try:
+            await db.execute("ALTER TABLE articles ADD COLUMN notified_at TEXT")
+        except aiosqlite.Error:
+            pass  # column already exists
         await db.commit()
 
 
@@ -151,6 +155,41 @@ async def latest_articles_by_keyword(
             (keyword, limit),
         )
     return [Article(*row, (keyword,)) for row in rows]
+
+
+async def latest_unnotified_articles_by_keyword(
+    database_path: Path,
+    keyword: str,
+    limit: int,
+) -> list[Article]:
+    await init_db(database_path)
+    async with aiosqlite.connect(database_path) as db:
+        rows = await db.execute_fetchall(
+            """
+            SELECT a.source, a.title, a.url, a.published_at, a.summary, a.content
+            FROM articles a
+            JOIN article_keywords ak ON ak.article_id = a.id
+            JOIN keywords k ON k.id = ak.keyword_id
+            WHERE k.value = ? AND a.notified_at IS NULL
+            ORDER BY COALESCE(a.published_at, a.fetched_at) DESC
+            LIMIT ?
+            """,
+            (keyword, limit),
+        )
+    return [Article(*row, (keyword,)) for row in rows]
+
+
+async def mark_articles_notified(database_path: Path, urls: list[str]) -> None:
+    if not urls:
+        return
+    await init_db(database_path)
+    now = datetime.now(timezone.utc).isoformat()
+    async with aiosqlite.connect(database_path) as db:
+        await db.executemany(
+            "UPDATE articles SET notified_at = ? WHERE url = ? AND notified_at IS NULL",
+            [(now, url) for url in urls],
+        )
+        await db.commit()
 
 
 def _tokenize_query(query: str) -> list[str]:

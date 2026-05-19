@@ -7,7 +7,7 @@ import httpx
 
 from briefing_bots.digest import build_channel_digest
 from briefing_bots.settings import load_config, load_digest_settings
-from briefing_bots.storage import init_db, sync_keywords
+from briefing_bots.storage import init_db, mark_articles_notified, sync_keywords
 
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
@@ -37,7 +37,7 @@ async def main() -> None:
             if not channel_id:
                 continue
 
-            digest = await build_channel_digest(
+            digest, used_urls = await build_channel_digest(
                 settings.database_path,
                 channel_config,
                 max_items,
@@ -50,6 +50,7 @@ async def main() -> None:
                 continue
 
             await post_discord_message(http, settings.digest_discord_token, int(channel_id), digest)
+            await mark_articles_notified(settings.database_path, used_urls)
 
 
 async def post_discord_message(
