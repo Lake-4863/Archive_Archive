@@ -3,5 +3,5 @@ builder = "nixpacks"
 buildCommand = "pip install -e ."
 
 [deploy]
-startCommand = "python -m briefing_bots.qa_bot"
+startCommand = "python -m briefing_bots.run_all"
 restartPolicyType = "always"

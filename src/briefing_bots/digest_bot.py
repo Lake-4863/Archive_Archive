@@ -7,7 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from briefing_bots.digest import build_channel_digest
 from briefing_bots.settings import load_config, load_digest_settings
-from briefing_bots.storage import init_db, sync_keywords
+from briefing_bots.storage import init_db, mark_articles_notified, sync_keywords
 
 
 async def main() -> None:
@@ -33,10 +33,11 @@ async def main() -> None:
                 continue
             try:
                 channel = client.get_channel(channel_id) or await client.fetch_channel(channel_id)
-                digest = await build_channel_digest(
+                digest, used_urls = await build_channel_digest(
                     settings.database_path, channel_config, max_items, max_chars, settings.openai_model
                 )
                 await channel.send(digest)
+                await mark_articles_notified(settings.database_path, used_urls)
             except Exception as e:
                 print(f"Error posting to channel {channel_id}: {e}")
 
