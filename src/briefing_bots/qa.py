@@ -7,8 +7,17 @@ from openai import AsyncOpenAI
 
 from briefing_bots.storage import latest_articles, search_articles
 
+History = list[dict[str, str]]
 
-async def answer_question(database_path: Path, question: str, model: str) -> str:
+
+async def answer_question(
+    database_path: Path,
+    question: str,
+    model: str,
+    history: History | None = None,
+) -> tuple[str, History]:
+    history = list(history or [])
+
     fts_articles = await search_articles(database_path, question, limit=10)
     recent_articles = await latest_articles(database_path, limit=6)
 
@@ -19,33 +28,50 @@ async def answer_question(database_path: Path, question: str, model: str) -> str
             seen_urls.add(article.url)
             candidates.append(article)
 
-    if not candidates:
-        return "関連する収集済み情報が見つかりませんでした"
-
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    context = "\n\n".join(
-        f"[{i + 1}] {a.source} | {a.published_at or '日付不明'}\n"
-        f"タイトル: {a.title}\n"
-        f"要約: {a.summary}\n"
-        f"URL: {a.url}"
-        for i, a in enumerate(candidates)
-    )
+
+    history_text = ""
+    if history:
+        lines = []
+        for msg in history:
+            role = "ユーザー" if msg["role"] == "user" else "アシスタント"
+            lines.append(f"{role}: {msg['content']}")
+        history_text = "【過去の会話】\n" + "\n".join(lines) + "\n\n"
+
+    if candidates:
+        context_text = "収集済み記事:\n" + "\n\n".join(
+            f"[{i + 1}] {a.source} | {a.published_at or '日付不明'}\n"
+            f"タイトル: {a.title}\n"
+            f"要約: {a.summary}\n"
+            f"URL: {a.url}"
+            for i, a in enumerate(candidates)
+        )
+    else:
+        context_text = "収集済み記事: なし"
 
     response = await AsyncOpenAI().responses.create(
         model=model,
         input=(
             f"現在時刻: {now}\n\n"
-            "あなたは情報キュレーターです。以下の収集済み記事の中から、"
-            "ユーザーの質問に関連する情報を注目度と新鮮度を考慮して選び、日本語で回答してください。\n\n"
+            "あなたはゲーム情報に詳しいアシスタントです。"
+            "収集済み記事があればそれを優先して回答し、記事にない情報は自分の知識で補完して答えてください。"
+            "過去の会話があれば文脈を踏まえて自然に回答してください。\n\n"
             "ルール:\n"
-            "- 質問に最も関連性が高く、かつ新しい情報を優先して紹介する\n"
-            "- 記事の日付を参考に鮮度を判断する\n"
-            "- 各情報には必ず記事番号とURLを添える\n"
-            "- 収集済み記事に根拠がない情報は述べない\n"
-            "- 関連情報が見つからない場合はその旨を伝える\n\n"
+            "- 収集済み記事の情報は新鮮度と関連度を考慮して優先する\n"
+            "- 記事を参照した場合は記事番号とURLを添える\n"
+            "- 記事にない情報は自分の知識で補完してよい（その場合は「記事にはありませんが」と一言添える）\n"
+            "- 会話の流れを踏まえて自然に答える\n\n"
+            f"{history_text}"
             f"質問: {question}\n\n"
-            f"収集済み記事:\n{context}"
+            f"{context_text}"
         ),
         max_output_tokens=1000,
     )
-    return response.output_text.strip()
+    answer = response.output_text.strip()
+
+    history.append({"role": "user", "content": question})
+    history.append({"role": "assistant", "content": answer})
+    if len(history) > 20:
+        history = history[-20:]
+
+    return answer, history
