@@ -42,7 +42,7 @@ class QaSettings:
 
 
 def load_settings() -> Settings:
-    load_dotenv()
+    load_dotenv(override=True)
     return Settings(
         openai_api_key=_required("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
@@ -56,7 +56,7 @@ def load_settings() -> Settings:
 
 
 def load_digest_settings() -> DigestSettings:
-    load_dotenv()
+    load_dotenv(override=True)
     return DigestSettings(
         openai_api_key=_required("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
@@ -68,7 +68,7 @@ def load_digest_settings() -> DigestSettings:
 
 
 def load_qa_settings() -> QaSettings:
-    load_dotenv()
+    load_dotenv(override=True)
     return QaSettings(
         openai_api_key=_required("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
