@@ -238,16 +238,22 @@ async def search_articles(database_path: Path, query: str, limit: int = 8) -> li
         if rows:
             return [Article(*row) for row in rows]
 
-        like_query = f"%{query}%"
+        terms = [t for t in query.split() if t]
+        if not terms:
+            return []
+        conditions = " OR ".join(
+            ["(title LIKE ? OR summary LIKE ? OR content LIKE ?)"] * len(terms)
+        )
+        params = [p for t in terms for p in (f"%{t}%", f"%{t}%", f"%{t}%")]
         rows = await db.execute_fetchall(
-            """
+            f"""
             SELECT source, title, url, published_at, summary, content
             FROM articles
-            WHERE title LIKE ? OR summary LIKE ? OR content LIKE ?
+            WHERE {conditions}
             ORDER BY COALESCE(published_at, fetched_at) DESC
             LIMIT ?
             """,
-            (like_query, like_query, like_query, limit),
+            (*params, limit),
         )
     return [Article(*row) for row in rows]
 
