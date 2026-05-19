@@ -5,9 +5,10 @@ import asyncio
 import discord
 from discord import app_commands
 
+from briefing_bots.collector import collect_articles
 from briefing_bots.qa import History, answer_question
-from briefing_bots.settings import load_qa_settings
-from briefing_bots.storage import init_db
+from briefing_bots.settings import load_config, load_qa_settings
+from briefing_bots.storage import init_db, upsert_articles
 
 _histories: dict[int, History] = {}
 
@@ -35,6 +36,20 @@ async def main() -> None:
         )
         _histories[user_id] = updated
         await interaction.followup.send(answer[:1900])
+
+    @tree.command(name="collect", description="記事を収集してDBに保存する")
+    async def collect(interaction: discord.Interaction) -> None:
+        await interaction.response.defer(thinking=True)
+        config = load_config(settings.config_path)
+        channels = config.get("channels", [])
+        max_items = int(config.get("digest", {}).get("max_items", 12))
+        total = 0
+        for channel_config in channels:
+            keywords = channel_config.get("keywords", [])
+            sources = channel_config.get("sources", [])
+            collected = await collect_articles(sources, settings.openai_model, keywords, max_items)
+            total += await upsert_articles(settings.database_path, collected)
+        await interaction.followup.send(f"収集完了！新規記事 {total} 件をDBに保存しました。")
 
     @tree.command(name="reset", description="会話履歴をリセットする")
     async def reset(interaction: discord.Interaction) -> None:
