@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,12 +35,37 @@ async def init_db(database_path: Path) -> None:
             )
             """
         )
-        await db.execute(
-            """
-            CREATE VIRTUAL TABLE IF NOT EXISTS article_search
-            USING fts5(title, summary, content, url UNINDEXED, source UNINDEXED)
-            """
+        rows = await db.execute_fetchall(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='article_search'"
         )
+        if not rows:
+            try:
+                await db.execute(
+                    "CREATE VIRTUAL TABLE article_search "
+                    "USING fts5(title, summary, content, url UNINDEXED, source UNINDEXED, tokenize='trigram')"
+                )
+            except aiosqlite.Error:
+                await db.execute(
+                    "CREATE VIRTUAL TABLE article_search "
+                    "USING fts5(title, summary, content, url UNINDEXED, source UNINDEXED)"
+                )
+        elif "trigram" not in (rows[0][0] or "").lower():
+            try:
+                await db.execute(
+                    "CREATE VIRTUAL TABLE _article_search_new "
+                    "USING fts5(title, summary, content, url UNINDEXED, source UNINDEXED, tokenize='trigram')"
+                )
+                await db.execute(
+                    "INSERT INTO _article_search_new(rowid, title, summary, content, url, source) "
+                    "SELECT rowid, title, summary, content, url, source FROM article_search"
+                )
+                await db.execute("DROP TABLE article_search")
+                await db.execute("ALTER TABLE _article_search_new RENAME TO article_search")
+            except aiosqlite.Error:
+                try:
+                    await db.execute("DROP TABLE IF EXISTS _article_search_new")
+                except aiosqlite.Error:
+                    pass
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS keywords (
@@ -192,27 +216,10 @@ async def mark_articles_notified(database_path: Path, urls: list[str]) -> None:
         await db.commit()
 
 
-def _tokenize_query(query: str) -> list[str]:
-    tokens = [t for t in query.split() if t]
-    extra = []
-    for token in tokens:
-        if re.search(r'[^\x00-\x7F]', token) and re.search(r'[A-Za-z0-9]', token):
-            extra.extend(re.findall(r'[A-Za-z0-9]+', token))
-    seen: set[str] = set()
-    result = []
-    for t in tokens + extra:
-        if t not in seen:
-            seen.add(t)
-            result.append(t)
-    return result
-
-
 async def search_articles(database_path: Path, query: str, limit: int = 8) -> list[Article]:
     await init_db(database_path)
-    tokens = _tokenize_query(query)
-    if not tokens:
+    if not query.strip():
         return []
-    fts_query = " OR ".join(f'"{token}"' for token in tokens)
     async with aiosqlite.connect(database_path) as db:
         try:
             rows = await db.execute_fetchall(
@@ -224,7 +231,7 @@ async def search_articles(database_path: Path, query: str, limit: int = 8) -> li
                 ORDER BY bm25(article_search)
                 LIMIT ?
                 """,
-                (fts_query, limit),
+                (query, limit),
             )
         except aiosqlite.Error:
             rows = []
