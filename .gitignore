@@ -1,2 +1,16 @@
 .env
 .env.local
+.company/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+*.egg-info/
+dist/
+.venv/
+venv/
+
+# Data
+data/*.sqlite3
