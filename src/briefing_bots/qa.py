@@ -10,6 +10,19 @@ from briefing_bots.storage import latest_articles, search_articles
 History = list[dict[str, str]]
 
 
+async def _extract_search_terms(question: str, model: str) -> str:
+    response = await AsyncOpenAI().responses.create(
+        model=model,
+        input=(
+            "以下の質問から検索キーワードを抽出し、スペース区切りで出力してください。"
+            "固有名詞・イベント名・専門用語を優先し、助詞・助動詞は含めないでください。3語以内。\n\n"
+            f"質問: {question}"
+        ),
+        max_output_tokens=30,
+    )
+    return response.output_text.strip()
+
+
 async def answer_question(
     database_path: Path,
     question: str,
@@ -18,7 +31,8 @@ async def answer_question(
 ) -> tuple[str, History]:
     history = list(history or [])
 
-    fts_articles = await search_articles(database_path, question, limit=10)
+    search_terms = await _extract_search_terms(question, model)
+    fts_articles = await search_articles(database_path, search_terms, limit=10)
     recent_articles = await latest_articles(database_path, limit=6)
 
     seen_urls: set[str] = set()
