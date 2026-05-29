@@ -35,8 +35,12 @@ async def _collect_rss_source(
     keywords: list[str],
     max_items: int,
 ) -> list[Article]:
-    response = await http.get(source["url"])
-    response.raise_for_status()
+    try:
+        response = await http.get(source["url"])
+        response.raise_for_status()
+    except httpx.HTTPError as e:
+        print(f"[{source.get('name', source['url'])}] skipped: {e}")
+        return []
     feed = feedparser.parse(response.text)
     articles: list[Article] = []
 
