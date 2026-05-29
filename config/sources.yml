@@ -1,6 +1,6 @@
 schedule:
-  hour: 20
-  minute: 30
+  hour: 7
+  minute: 0
 
 digest:
   max_items: 12

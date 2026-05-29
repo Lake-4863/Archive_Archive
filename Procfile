@@ -1,1 +1,1 @@
-worker: python -m briefing_bots.qa_bot
+worker: python -m briefing_bots.run_all
